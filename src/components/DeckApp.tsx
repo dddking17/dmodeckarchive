@@ -186,7 +186,8 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
     if (statusFilter === "ready" && !st.ready) return false;
     if (statusFilter === "incomplete" && st.ready) return false;
     if (deckSearch) {
-      const hay = (deck.name + " " + deck.description + " " + deck.effect).toLowerCase();
+      const memberNames = deck.member_ids.map((id) => digimonById(id)?.name ?? "").join(" ");
+      const hay = (deck.name + " " + deck.description + " " + deck.effect + " " + memberNames).toLowerCase();
       if (!hay.includes(deckSearch.trim().toLowerCase())) return false;
     }
     return true;
@@ -408,7 +409,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
           <div className="toolbar">
             <input
               type="search"
-              placeholder="덱 이름, 설명, 효과로 검색"
+              placeholder="덱 이름, 디지몬 이름, 설명, 효과로 검색"
               value={deckSearch}
               onChange={(e) => setDeckSearch(e.target.value)}
               aria-label="덱 검색"
@@ -536,19 +537,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                 const owned = isOwned(d.id);
                 return (
                   <div key={d.id} className="digimon-card">
-                    <span className={`avatar-slot${d.is_u_grade ? " is-u-grade" : ""}`}>
-                      <span
-                        className={`avatar${owned ? "" : " is-missing"}`}
-                        style={owned && !d.image_url ? { background: avatarColor(d.name) } : undefined}
-                      >
-                        {d.image_url ? <img src={d.image_url} alt={d.name} /> : initials(d.name)}
-                      </span>
-                    </span>
-                    <div className="digimon-info">
-                      <DigimonName name={d.name} className="dname" />
-                      <div className="duse">{usageCount(d.id)}개 덱에 사용됨{d.is_u_grade ? " · U등급" : ""}</div>
-                    </div>
-                    <div className="digimon-card-actions">
+                    <div className="digimon-card-top">
                       <label className="switch" title="보유 여부 전환">
                         <input type="checkbox" checked={owned} onChange={() => handleToggleOwned(d)} aria-label={`${d.name} 보유 여부`} />
                         <span className="switch-track" />
@@ -556,6 +545,20 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                       {isAdmin && (
                         <button className="icon-btn" title="수정" aria-label="디지몬 수정" onClick={() => openDigimonModal(d)}>✎</button>
                       )}
+                    </div>
+                    <div className="digimon-card-body">
+                      <span className={`avatar-slot${d.is_u_grade ? " is-u-grade" : ""}`}>
+                        <span
+                          className={`avatar${owned ? "" : " is-missing"}`}
+                          style={owned && !d.image_url ? { background: avatarColor(d.name) } : undefined}
+                        >
+                          {d.image_url ? <img src={d.image_url} alt={d.name} /> : initials(d.name)}
+                        </span>
+                      </span>
+                      <div className="digimon-info">
+                        <DigimonName name={d.name} className="dname" />
+                        <div className="duse">{usageCount(d.id)}개 덱에 사용됨{d.is_u_grade ? " · U등급" : ""}</div>
+                      </div>
                     </div>
                   </div>
                 );
