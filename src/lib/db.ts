@@ -29,15 +29,32 @@ export async function fetchDecks(supabase: SupabaseClient, userId: string) {
 export async function upsertDigimon(
   supabase: SupabaseClient,
   userId: string,
-  digimon: { id?: string; name: string; owned: boolean }
+  digimon: { id?: string; name: string; owned: boolean; image_url?: string | null }
 ) {
-  const { data, error } = await supabase
-    .from("digimons")
-    .upsert({ id: digimon.id, user_id: userId, name: digimon.name, owned: digimon.owned })
-    .select()
-    .single();
+  const payload: Record<string, unknown> = {
+    id: digimon.id,
+    user_id: userId,
+    name: digimon.name,
+    owned: digimon.owned,
+  };
+  // image_url을 명시적으로 넘기지 않으면(기존 값 유지) 컬럼을 건드리지 않습니다.
+  if (digimon.image_url !== undefined) payload.image_url = digimon.image_url;
+
+  const { data, error } = await supabase.from("digimons").upsert(payload).select().single();
   if (error) throw error;
   return data as Digimon;
+}
+
+/** 디지몬 이미지를 Supabase Storage에 업로드하고 공개 URL을 반환 */
+export async function uploadDigimonImage(supabase: SupabaseClient, userId: string, file: File) {
+  const ext = file.name.split(".").pop()?.toLowerCase() || "png";
+  const path = `${userId}/${crypto.randomUUID()}.${ext}`;
+  const { error } = await supabase.storage
+    .from("digimon-images")
+    .upload(path, file, { upsert: true, cacheControl: "3600" });
+  if (error) throw error;
+  const { data } = supabase.storage.from("digimon-images").getPublicUrl(path);
+  return data.publicUrl;
 }
 
 export async function setDigimonOwned(supabase: SupabaseClient, id: string, owned: boolean) {
@@ -53,7 +70,7 @@ export async function deleteDigimon(supabase: SupabaseClient, id: string) {
 export async function upsertDeck(
   supabase: SupabaseClient,
   userId: string,
-  deck: { id?: string; name: string; tier: Tier; effect: string; member_ids: string[] }
+  deck: { id?: string; name: string; tier: Tier; description: string; effect: string; member_ids: string[] }
 ) {
   const { data, error } = await supabase
     .from("decks")
@@ -62,6 +79,7 @@ export async function upsertDeck(
       user_id: userId,
       name: deck.name,
       tier: deck.tier,
+      description: deck.description,
       effect: deck.effect,
       member_ids: deck.member_ids,
     })

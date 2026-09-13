@@ -10,6 +10,7 @@ import {
   fetchDigimons,
   removeDigimonFromAllDecks,
   setDigimonOwned,
+  uploadDigimonImage,
   upsertDeck,
   upsertDigimon,
 } from "@/lib/db";
@@ -29,6 +30,7 @@ type DeckFormState = {
   id: string | null;
   name: string;
   tier: Tier;
+  description: string;
   effect: string;
   memberIds: string[];
 };
@@ -37,10 +39,12 @@ type DigimonFormState = {
   id: string | null;
   name: string;
   owned: boolean;
+  imageUrl: string | null;
+  imageFile: File | null;
 };
 
-const emptyDeckForm: DeckFormState = { id: null, name: "", tier: "A", effect: "", memberIds: [] };
-const emptyDigimonForm: DigimonFormState = { id: null, name: "", owned: false };
+const emptyDeckForm: DeckFormState = { id: null, name: "", tier: "A", description: "", effect: "", memberIds: [] };
+const emptyDigimonForm: DigimonFormState = { id: null, name: "", owned: false, imageUrl: null, imageFile: null };
 
 export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: Props) {
   const supabase = useMemo(() => createClient(), []);
@@ -128,7 +132,8 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
   function deckStatus(deck: Deck) {
     const total = deck.member_ids.length;
     const owned = deck.member_ids.filter((id) => digimons.find((d) => d.id === id)?.owned).length;
-    return { owned, total, ready: total > 0 && owned === total };
+    const percent = total > 0 ? Math.round((owned / total) * 100) : 0;
+    return { owned, total, ready: total > 0 && owned === total, percent };
   }
 
   function usageCount(digimonId: string) {
@@ -148,7 +153,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
     if (statusFilter === "ready" && !st.ready) return false;
     if (statusFilter === "incomplete" && st.ready) return false;
     if (deckSearch) {
-      const hay = (deck.name + " " + deck.effect).toLowerCase();
+      const hay = (deck.name + " " + deck.description + " " + deck.effect).toLowerCase();
       if (!hay.includes(deckSearch.trim().toLowerCase())) return false;
     }
     return true;
@@ -169,7 +174,14 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
   function openDeckModal(deck: Deck | null) {
     setDeckForm(
       deck
-        ? { id: deck.id, name: deck.name, tier: deck.tier, effect: deck.effect, memberIds: [...deck.member_ids] }
+        ? {
+            id: deck.id,
+            name: deck.name,
+            tier: deck.tier,
+            description: deck.description,
+            effect: deck.effect,
+            memberIds: [...deck.member_ids],
+          }
         : emptyDeckForm
     );
     setPickerSearch("");
@@ -185,6 +197,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
         id: deckForm.id ?? undefined,
         name,
         tier: deckForm.tier,
+        description: deckForm.description.trim(),
         effect: deckForm.effect.trim(),
         member_ids: deckForm.memberIds,
       });
@@ -234,19 +247,42 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
   }
 
   // ---------- digimon handlers ----------
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!digimonForm.imageFile) {
+      setImagePreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(digimonForm.imageFile);
+    setImagePreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [digimonForm.imageFile]);
+
   function openDigimonModal(digimon: Digimon | null) {
-    setDigimonForm(digimon ? { id: digimon.id, name: digimon.name, owned: digimon.owned } : emptyDigimonForm);
+    setDigimonForm(
+      digimon
+        ? { id: digimon.id, name: digimon.name, owned: digimon.owned, imageUrl: digimon.image_url, imageFile: null }
+        : emptyDigimonForm
+    );
     setDigimonModalOpen(true);
   }
 
   async function saveDigimon() {
     const name = digimonForm.name.trim();
     if (!name) return;
+    setUploadingImage(true);
     try {
+      let imageUrl = digimonForm.imageUrl;
+      if (digimonForm.imageFile) {
+        imageUrl = await uploadDigimonImage(supabase, userId, digimonForm.imageFile);
+      }
       const saved = await upsertDigimon(supabase, userId, {
         id: digimonForm.id ?? undefined,
         name,
         owned: digimonForm.owned,
+        image_url: imageUrl,
       });
       setDigimons((prev) => {
         const exists = prev.some((d) => d.id === saved.id);
@@ -255,7 +291,9 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
       setDigimonModalOpen(false);
     } catch (err) {
       console.error(err);
-      setErrorMsg("디지몬 저장에 실패했습니다.");
+      setErrorMsg("디지몬 저장에 실패했습니다. 이미지 용량이 너무 크지 않은지 확인해 주세요.");
+    } finally {
+      setUploadingImage(false);
     }
   }
 
@@ -339,7 +377,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
           <div className="toolbar">
             <input
               type="search"
-              placeholder="덱 이름 또는 효과로 검색"
+              placeholder="덱 이름, 설명, 효과로 검색"
               value={deckSearch}
               onChange={(e) => setDeckSearch(e.target.value)}
               aria-label="덱 검색"
@@ -371,13 +409,25 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                       <div className="deck-name-row">
                         <span className={`tier-badge tier-${deck.tier}`}>{deck.tier}</span>
                         <span className="deck-name">{deck.name}</span>
+                        <span className="info-wrap">
+                          <button type="button" className="info-trigger" aria-label="덱 설명과 효과 보기">i</button>
+                          <div className="info-popover" role="tooltip">
+                            <div className="info-section">
+                              <h4>설명</h4>
+                              {deck.description ? deck.description : <span className="info-empty">등록된 설명이 없습니다</span>}
+                            </div>
+                            <div className="info-section">
+                              <h4>효과</h4>
+                              {deck.effect ? deck.effect : <span className="info-empty">등록된 효과가 없습니다</span>}
+                            </div>
+                          </div>
+                        </span>
                       </div>
                       <div className="card-actions">
                         <button className="icon-btn" title="수정" aria-label="덱 수정" onClick={() => openDeckModal(deck)}>✎</button>
                         <button className="icon-btn danger" title="삭제" aria-label="덱 삭제" onClick={() => handleDeleteDeck(deck.id, deck.name)}>🗑</button>
                       </div>
                     </div>
-                    {deck.effect && <p className="deck-effect">{deck.effect}</p>}
                     <div className="member-row">
                       {deck.member_ids.length === 0 ? (
                         <span className="picker-empty">등록된 디지몬 없음</span>
@@ -389,17 +439,17 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                             <span
                               key={id}
                               className={`avatar${d.owned ? "" : " is-missing"}`}
-                              style={d.owned ? { background: avatarColor(d.name) } : undefined}
+                              style={d.owned && !d.image_url ? { background: avatarColor(d.name) } : undefined}
                               title={`${d.name}${d.owned ? " (보유)" : " (미보유)"}`}
                             >
-                              {initials(d.name)}
+                              {d.image_url ? <img src={d.image_url} alt={d.name} /> : initials(d.name)}
                             </span>
                           );
                         })
                       )}
                     </div>
                     <div className="deck-card-foot">
-                      <span className="progress-frac">{st.owned} / {st.total} 보유</span>
+                      <span className="progress-frac">{st.owned}/{st.total} <span className="pct">· {st.percent}%</span></span>
                       <span className={`status-pill ${st.ready ? "ready" : "incomplete"}`}>
                         {st.ready ? "편성 가능" : st.total === 0 ? "디지몬 미지정" : `${st.total - st.owned}개 부족`}
                       </span>
@@ -439,9 +489,9 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                 <div key={d.id} className="digimon-card">
                   <span
                     className={`avatar${d.owned ? "" : " is-missing"}`}
-                    style={d.owned ? { background: avatarColor(d.name) } : undefined}
+                    style={d.owned && !d.image_url ? { background: avatarColor(d.name) } : undefined}
                   >
-                    {initials(d.name)}
+                    {d.image_url ? <img src={d.image_url} alt={d.name} /> : initials(d.name)}
                   </span>
                   <div className="digimon-info">
                     <div className="dname">{d.name}</div>
@@ -485,6 +535,15 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
               </select>
             </div>
             <div className="field">
+              <label htmlFor="deckDescription">덱 설명</label>
+              <textarea
+                id="deckDescription"
+                placeholder="예: 성속성 공격형 덱으로, 보스전에서 안정적인 딜을 넣을 수 있습니다"
+                value={deckForm.description}
+                onChange={(e) => setDeckForm((p) => ({ ...p, description: e.target.value }))}
+              />
+            </div>
+            <div className="field">
               <label htmlFor="deckEffect">덱 효과</label>
               <textarea
                 id="deckEffect"
@@ -516,7 +575,9 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                         aria-pressed={selected}
                         onClick={() => toggleMember(d.id)}
                       >
-                        <span className="avatar mini-avatar" style={{ background: avatarColor(d.name) }}>{initials(d.name)}</span>
+                        <span className="avatar mini-avatar" style={d.image_url ? undefined : { background: avatarColor(d.name) }}>
+                          {d.image_url ? <img src={d.image_url} alt="" /> : initials(d.name)}
+                        </span>
                         {d.name}{!d.owned && " ⋅ 미보유"}
                       </button>
                     );
@@ -567,6 +628,33 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                 autoFocus
               />
             </div>
+            <div className="field">
+              <label>이미지</label>
+              <div className="image-upload-row">
+                <span
+                  className="image-preview"
+                  style={
+                    !imagePreviewUrl && !digimonForm.imageUrl
+                      ? { background: avatarColor(digimonForm.name || "?") }
+                      : undefined
+                  }
+                >
+                  {imagePreviewUrl || digimonForm.imageUrl ? (
+                    <img src={imagePreviewUrl ?? digimonForm.imageUrl ?? undefined} alt="" />
+                  ) : (
+                    initials(digimonForm.name || "?")
+                  )}
+                </span>
+                <div className="image-upload-controls">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setDigimonForm((p) => ({ ...p, imageFile: e.target.files?.[0] ?? null }))}
+                  />
+                  <span className="image-upload-hint">등록하지 않으면 이름 첫 글자로 표시돼요</span>
+                </div>
+              </div>
+            </div>
             <div className="field" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <label htmlFor="digimonOwned" style={{ margin: 0 }}>보유 중</label>
               <label className="switch">
@@ -589,8 +677,10 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                 </button>
               )}
               <div className="right">
-                <button className="btn" onClick={() => setDigimonModalOpen(false)}>취소</button>
-                <button className="btn primary" onClick={saveDigimon}>저장</button>
+                <button className="btn" onClick={() => setDigimonModalOpen(false)} disabled={uploadingImage}>취소</button>
+                <button className="btn primary" onClick={saveDigimon} disabled={uploadingImage}>
+                  {uploadingImage ? "저장 중…" : "저장"}
+                </button>
               </div>
             </div>
           </div>
