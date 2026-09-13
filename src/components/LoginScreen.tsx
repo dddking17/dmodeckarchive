@@ -19,13 +19,28 @@ export default function LoginScreen() {
           👾
         </div>
         <h1>디지몬 덱 아카이브</h1>
-        <p>구글 계정으로 로그인하면 내 덱과 보유 디지몬 목록이 저장되어, 어떤 기기에서 열어도 그대로 이어집니다.</p>
+        <p className="login-lead">
+          디지몬 마스터즈의 전체 덱 목록을 정리해서 보여주는 팬 제작 참고 도구입니다.
+          39개 덱의 구성 디지몬, 설명, 발동 효과를 누구나 무료로 열람할 수 있어요.
+        </p>
+
+        <ul className="feature-list">
+          <li>전체 덱 목록과 구성 디지몬, 발동 효과를 한눈에 확인</li>
+          <li>로그인하면 내가 보유한 디지몬을 체크해서 편성 가능한 덱을 바로 확인</li>
+          <li>보유 여부는 계정별로 저장되어 어떤 기기에서 열어도 동일하게 유지</li>
+        </ul>
+
         <button className="google-btn" onClick={handleGoogleLogin}>
           <GoogleIcon />
-          구글로 로그인
+          구글로 로그인하고 내 보유 디지몬 체크하기
         </button>
-        <p className="login-note">로그인한 사람만 자신의 데이터를 보고 편집할 수 있어요.</p>
+        <p className="login-note">로그인은 "내가 보유한 디지몬"을 저장하기 위한 용도로만 사용되며, 비밀번호 등 민감한 정보는 수집하지 않습니다.</p>
       </div>
+
+      <footer className="login-footer">
+        <span>개인이 운영하는 비상업적 팬 프로젝트입니다.</span>
+        <a href="/privacy">개인정보처리방침</a>
+      </footer>
     </div>
   );
 }
