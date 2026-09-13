@@ -566,7 +566,14 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                           if (!d) return null;
                           const owned = isOwned(id);
                           return (
-                            <span key={id} className={`member-item${owned ? "" : " is-missing"}`} title={owned ? "보유" : "미보유"}>
+                            <button
+                              type="button"
+                              key={id}
+                              className={`member-item${owned ? "" : " is-missing"}`}
+                              title={owned ? "보유 중 · 클릭하면 미보유로 전환" : "미보유 · 클릭하면 보유로 전환"}
+                              aria-pressed={owned}
+                              onClick={() => handleToggleOwned(d)}
+                            >
                               <span className={`avatar-slot${d.is_u_grade ? " is-u-grade" : ""}`}>
                                 <span
                                   className={`avatar${owned ? "" : " is-missing"}`}
@@ -576,7 +583,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                                 </span>
                               </span>
                               <DigimonName name={d.name} />
-                            </span>
+                            </button>
                           );
                         })
                       )}

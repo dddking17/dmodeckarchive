@@ -164,7 +164,8 @@ a{color:var(--accent);}
 
 /* 덱 카드의 구성 디지몬: 아이콘 + 이름을 함께 표시 */
 .member-list{display:flex; flex-wrap:wrap; gap:6px;}
-.member-item{display:inline-flex; align-items:center; gap:6px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:3px 9px 3px 3px; font-size:12px; font-weight:600; color:var(--text);}
+.member-item{display:inline-flex; align-items:center; gap:6px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:3px 9px 3px 3px; font-size:12px; font-weight:600; color:var(--text); font-family:inherit; cursor:pointer; transition:border-color .12s ease, background .12s ease;}
+.member-item:hover{border-color:var(--text-faint); background:var(--surface-3);}
 .member-item.is-missing{color:var(--text-faint);}
 .member-item .avatar{width:27px; height:27px; font-size:11px; border-radius:6px;}
 .member-item .avatar img{border-radius:4px;}
