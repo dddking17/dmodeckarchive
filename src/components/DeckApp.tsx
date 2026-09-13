@@ -78,7 +78,6 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
 
   const [deckSearch, setDeckSearch] = useState("");
   const [tierFilter, setTierFilter] = useState<"all" | Tier>("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | "ready" | "incomplete">("all");
   const [deckSort, setDeckSort] = useState<"default" | "name" | "tier" | "ownedCount" | "ownedUCount">("default");
 
   const [digimonSearch, setDigimonSearch] = useState("");
@@ -179,7 +178,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
     const total = deck.member_ids.length;
     const owned = deck.member_ids.filter((id) => isOwned(id)).length;
     const percent = total > 0 ? Math.round((owned / total) * 100) : 0;
-    return { owned, total, ready: total > 0 && owned === total, percent };
+    return { owned, total, percent };
   }
 
   function usageCount(digimonId: string) {
@@ -227,14 +226,10 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
     }
   }
 
-  const readyCount = decks.filter((d) => deckStatus(d).ready).length;
   const ownedCount = digimons.filter((d) => isOwned(d.id)).length;
 
   const filteredDecksBase = decks.filter((deck) => {
     if (tierFilter !== "all" && deck.tier !== tierFilter) return false;
-    const st = deckStatus(deck);
-    if (statusFilter === "ready" && !st.ready) return false;
-    if (statusFilter === "incomplete" && st.ready) return false;
     if (deckSearch) {
       const memberNames = deck.member_ids.map((id) => digimonById(id)?.name ?? "").join(" ");
       const hay = (deck.name + " " + deck.description + " " + deck.effect + " " + memberNames).toLowerCase();
@@ -463,7 +458,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
         <div className="header-actions">
           <div className="stats">
             <span className="stat-pill">
-              <span className="dot" />덱 <b>{decks.length}</b>개 · 편성 가능 <b>{readyCount}</b>개
+              <span className="dot" />덱 <b>{decks.length}</b>개
             </span>
             <span className="stat-pill">
               디지몬 <b>{ownedCount}</b> / <b>{digimons.length}</b> 보유
@@ -501,11 +496,6 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
               <option value="all">전체 티어</option>
               {TIERS.map((t) => <option key={t} value={t}>{t} 티어</option>)}
             </select>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)} aria-label="상태 필터">
-              <option value="all">전체 상태</option>
-              <option value="ready">편성 가능</option>
-              <option value="incomplete">미완성</option>
-            </select>
             <select value={deckSort} onChange={(e) => setDeckSort(e.target.value as any)} aria-label="정렬 기준">
               <option value="default">기본 순서</option>
               <option value="name">이름순</option>
@@ -526,7 +516,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
               filteredDecks.map((deck) => {
                 const st = deckStatus(deck);
                 return (
-                  <article key={deck.id} className={`deck-card tier-${deck.tier}${st.ready ? " is-ready" : ""}`}>
+                  <article key={deck.id} className={`deck-card tier-${deck.tier}`}>
                     <div className="deck-card-head">
                       <div className="deck-name-row">
                         <button
@@ -598,9 +588,6 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                     )}
                     <div className="deck-card-foot">
                       <span className="progress-frac">{st.owned}/{st.total} <span className="pct">· {st.percent}%</span></span>
-                      <span className={`status-pill ${st.ready ? "ready" : "incomplete"}`}>
-                        {st.ready ? "편성 가능" : st.total === 0 ? "디지몬 미지정" : `${st.total - st.owned}개 부족`}
-                      </span>
                     </div>
                   </article>
                 );
