@@ -76,6 +76,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
   const [deckSearch, setDeckSearch] = useState("");
   const [tierFilter, setTierFilter] = useState<"all" | Tier>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "ready" | "incomplete">("all");
+  const [deckSort, setDeckSort] = useState<"name" | "tier" | "ownedCount" | "ownedUCount">("name");
 
   const [digimonSearch, setDigimonSearch] = useState("");
   const [ownFilter, setOwnFilter] = useState<"all" | "owned" | "missing">("all");
@@ -173,25 +174,54 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
     return deck.member_ids.filter((id) => digimonById(id)?.is_u_grade).length;
   }
 
+  function uOwnedCount(deck: Deck) {
+    return deck.member_ids.filter((id) => digimonById(id)?.is_u_grade && isOwned(id)).length;
+  }
+
+  /** "종결, 궁극의 성전!" → "종결, 궁극의 성전!(1U)". 이미 이름 끝에 "(NU)"가
+   * 수동으로 붙어있는 경우(예: "디지털 월드 수호자(5U)")는 중복 표시하지 않습니다. */
+  function deckDisplayName(deck: Deck) {
+    if (/\(\d+U\)$/.test(deck.name.trim())) return deck.name;
+    return `${deck.name}(${uGradeCount(deck)}U)`;
+  }
+
   function digimonById(id: string) {
     return digimons.find((d) => d.id === id) || null;
+  }
+
+  const TIER_RANK: Record<Tier, number> = { S: 0, A: 1, B: 2, C: 3, D: 4 };
+
+  function compareDecks(a: Deck, b: Deck) {
+    switch (deckSort) {
+      case "tier":
+        return TIER_RANK[a.tier] - TIER_RANK[b.tier];
+      case "ownedCount":
+        return deckStatus(b).owned - deckStatus(a).owned;
+      case "ownedUCount":
+        return uOwnedCount(b) - uOwnedCount(a);
+      case "name":
+      default:
+        return a.name.localeCompare(b.name, "ko");
+    }
   }
 
   const readyCount = decks.filter((d) => deckStatus(d).ready).length;
   const ownedCount = digimons.filter((d) => isOwned(d.id)).length;
 
-  const filteredDecks = decks.filter((deck) => {
-    if (tierFilter !== "all" && deck.tier !== tierFilter) return false;
-    const st = deckStatus(deck);
-    if (statusFilter === "ready" && !st.ready) return false;
-    if (statusFilter === "incomplete" && st.ready) return false;
-    if (deckSearch) {
-      const memberNames = deck.member_ids.map((id) => digimonById(id)?.name ?? "").join(" ");
-      const hay = (deck.name + " " + deck.description + " " + deck.effect + " " + memberNames).toLowerCase();
-      if (!hay.includes(deckSearch.trim().toLowerCase())) return false;
-    }
-    return true;
-  });
+  const filteredDecks = decks
+    .filter((deck) => {
+      if (tierFilter !== "all" && deck.tier !== tierFilter) return false;
+      const st = deckStatus(deck);
+      if (statusFilter === "ready" && !st.ready) return false;
+      if (statusFilter === "incomplete" && st.ready) return false;
+      if (deckSearch) {
+        const memberNames = deck.member_ids.map((id) => digimonById(id)?.name ?? "").join(" ");
+        const hay = (deck.name + " " + deck.description + " " + deck.effect + " " + memberNames).toLowerCase();
+        if (!hay.includes(deckSearch.trim().toLowerCase())) return false;
+      }
+      return true;
+    })
+    .sort(compareDecks);
 
   const filteredDigimons = digimons.filter((d) => {
     if (ownFilter === "owned" && !isOwned(d.id)) return false;
@@ -423,6 +453,12 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
               <option value="ready">편성 가능</option>
               <option value="incomplete">미완성</option>
             </select>
+            <select value={deckSort} onChange={(e) => setDeckSort(e.target.value as any)} aria-label="정렬 기준">
+              <option value="name">이름순</option>
+              <option value="tier">티어순</option>
+              <option value="ownedCount">보유 디지몬 수</option>
+              <option value="ownedUCount">보유 U디지몬 수</option>
+            </select>
             {isAdmin && <button className="btn primary" onClick={() => openDeckModal(null)}>+ 새 덱</button>}
           </div>
 
@@ -435,13 +471,12 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
             ) : (
               filteredDecks.map((deck) => {
                 const st = deckStatus(deck);
-                const uCount = uGradeCount(deck);
                 return (
                   <article key={deck.id} className={`deck-card tier-${deck.tier}${st.ready ? " is-ready" : ""}`}>
                     <div className="deck-card-head">
                       <div className="deck-name-row">
                         <span className={`tier-badge tier-${deck.tier}`}>{deck.tier}</span>
-                        <span className="deck-name">{deck.name}</span>
+                        <span className="deck-name">{deckDisplayName(deck)}</span>
                         <span className="info-wrap">
                           <button type="button" className="info-trigger" aria-label="덱 설명 보기">ⓘ</button>
                           <div className="info-popover" role="tooltip">
@@ -452,17 +487,12 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                           </div>
                         </span>
                       </div>
-                      <div className="deck-head-right">
-                        <span className={`u-grade-badge${uCount > 0 ? " has-u" : ""}`} title="덱에 사용된 U등급 디지몬 수">
-                          {uCount}U
-                        </span>
-                        {isAdmin && (
-                          <div className="card-actions">
-                            <button className="icon-btn" title="수정" aria-label="덱 수정" onClick={() => openDeckModal(deck)}>✎</button>
-                            <button className="icon-btn danger" title="삭제" aria-label="덱 삭제" onClick={() => handleDeleteDeck(deck.id, deck.name)}>🗑</button>
-                          </div>
-                        )}
-                      </div>
+                      {isAdmin && (
+                        <div className="card-actions">
+                          <button className="icon-btn" title="수정" aria-label="덱 수정" onClick={() => openDeckModal(deck)}>✎</button>
+                          <button className="icon-btn danger" title="삭제" aria-label="덱 삭제" onClick={() => handleDeleteDeck(deck.id, deck.name)}>🗑</button>
+                        </div>
+                      )}
                     </div>
                     <div className="member-list">
                       {deck.member_ids.length === 0 ? (
