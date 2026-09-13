@@ -116,22 +116,11 @@ a{color:var(--accent);}
 
 /* ---- Deck grid ---- */
 .deck-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(300px,1fr)); gap:16px; align-items:start;}
-.deck-card{background:var(--surface); border:1px solid var(--border); border-left:4px solid var(--tier-c); border-radius:var(--radius-md); padding:16px 18px 14px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:12px;}
-.deck-card.tier-S{border-left-color:var(--tier-s);}
-.deck-card.tier-A{border-left-color:var(--tier-a);}
-.deck-card.tier-B{border-left-color:var(--tier-b);}
-.deck-card.tier-C{border-left-color:var(--tier-c);}
-.deck-card.tier-D{border-left-color:var(--tier-d);}
+.deck-card{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-md); padding:16px 18px 14px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:12px;}
 
 .deck-card-head{display:flex; align-items:flex-start; justify-content:space-between; gap:10px;}
 .deck-name-row{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
 .deck-name{font-size:16.5px; font-weight:900; letter-spacing:0.2px;}
-.tier-badge{font-family:var(--font-mono); font-weight:600; font-size:11.5px; padding:2px 8px; border-radius:6px; letter-spacing:0.5px;}
-.tier-badge.tier-S{background:var(--tier-s-soft); color:var(--tier-s);}
-.tier-badge.tier-A{background:var(--tier-a-soft); color:var(--tier-a);}
-.tier-badge.tier-B{background:var(--tier-b-soft); color:var(--tier-b);}
-.tier-badge.tier-C{background:var(--tier-c-soft); color:var(--tier-c);}
-.tier-badge.tier-D{background:var(--tier-d-soft); color:var(--tier-d);}
 .card-actions{display:flex; gap:6px; flex:none;}
 .star-btn{border:none; background:none; padding:0; font-size:18px; line-height:1; color:var(--text-faint); cursor:pointer; flex:none;}
 .star-btn:hover{color:var(--tier-a);}

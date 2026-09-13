@@ -32,7 +32,6 @@ function DigimonName({ name, className }: { name: string; className?: string }) 
   );
 }
 
-const TIERS: Tier[] = ["S", "A", "B", "C", "D"];
 const ADMIN_USER_ID = process.env.NEXT_PUBLIC_ADMIN_USER_ID;
 
 type Props = {
@@ -78,8 +77,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
   const [theme, setTheme] = useState<"system" | "light" | "dark">("system");
 
   const [deckSearch, setDeckSearch] = useState("");
-  const [tierFilter, setTierFilter] = useState<"all" | Tier>("all");
-  const [deckSort, setDeckSort] = useState<"default" | "name" | "tier" | "ownedCount" | "ownedUCount">("default");
+  const [deckSort, setDeckSort] = useState<"default" | "name" | "ownedCount" | "ownedUCount">("default");
 
   const [digimonSearch, setDigimonSearch] = useState("");
   const [ownFilter, setOwnFilter] = useState<"all" | "owned" | "missing">("all");
@@ -217,16 +215,12 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
     return digimons.find((d) => d.id === id) || null;
   }
 
-  const TIER_RANK: Record<Tier, number> = { S: 0, A: 1, B: 2, C: 3, D: 4 };
-
   function isFavorite(deckId: string) {
     return favorites.has(deckId);
   }
 
   function compareDecks(a: Deck, b: Deck) {
     switch (deckSort) {
-      case "tier":
-        return TIER_RANK[a.tier] - TIER_RANK[b.tier];
       case "ownedCount":
         return deckStatus(b).owned - deckStatus(a).owned;
       case "ownedUCount":
@@ -242,7 +236,6 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
   const ownedCount = digimons.filter((d) => isOwned(d.id)).length;
 
   const filteredDecksBase = decks.filter((deck) => {
-    if (tierFilter !== "all" && deck.tier !== tierFilter) return false;
     if (deckSearch) {
       const memberNames = deck.member_ids.map((id) => digimonById(id)?.name ?? "").join(" ");
       const hay = (deck.name + " " + deck.description + " " + deck.effect + " " + memberNames).toLowerCase();
@@ -516,14 +509,9 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
               onChange={(e) => setDeckSearch(e.target.value)}
               aria-label="덱 검색"
             />
-            <select value={tierFilter} onChange={(e) => setTierFilter(e.target.value as any)} aria-label="티어 필터">
-              <option value="all">전체 티어</option>
-              {TIERS.map((t) => <option key={t} value={t}>{t} 티어</option>)}
-            </select>
             <select value={deckSort} onChange={(e) => setDeckSort(e.target.value as any)} aria-label="정렬 기준">
               <option value="default">기본 순서</option>
               <option value="name">이름순</option>
-              <option value="tier">티어순</option>
               <option value="ownedCount">보유 디지몬 수</option>
               <option value="ownedUCount">보유 U디지몬 수</option>
             </select>
@@ -540,7 +528,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
               filteredDecks.map((deck) => {
                 const st = deckStatus(deck);
                 return (
-                  <article key={deck.id} className={`deck-card tier-${deck.tier}`}>
+                  <article key={deck.id} className="deck-card">
                     <div className="deck-card-head">
                       <div className="deck-name-row">
                         <button
@@ -552,7 +540,6 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                         >
                           {isFavorite(deck.id) ? "★" : "☆"}
                         </button>
-                        <span className={`tier-badge tier-${deck.tier}`}>{deck.tier}</span>
                         <span className="deck-name">{deckDisplayName(deck)}</span>
                         <span className="info-wrap">
                           <button type="button" className="info-trigger" aria-label="덱 설명 보기">ⓘ</button>
@@ -700,12 +687,6 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                 onChange={(e) => setDeckForm((p) => ({ ...p, name: e.target.value }))}
                 autoFocus
               />
-            </div>
-            <div className="field">
-              <label htmlFor="deckTier">덱 티어</label>
-              <select id="deckTier" value={deckForm.tier} onChange={(e) => setDeckForm((p) => ({ ...p, tier: e.target.value as Tier }))}>
-                {TIERS.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
             </div>
             <div className="field">
               <label htmlFor="deckDescription">덱 설명</label>
