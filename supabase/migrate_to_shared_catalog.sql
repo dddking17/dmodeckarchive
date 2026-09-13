@@ -22,15 +22,22 @@ create table if not exists public.user_digimon_ownership (
 );
 
 -- 3) 기존에 "보유"로 체크해뒀던 디지몬을 새 보유 테이블로 이관 (관리자 UID 필요)
+-- owned 컬럼이 이미 삭제된 상태(=이 마이그레이션을 이미 실행한 적 있음)라면
+-- 조용히 건너뜁니다. 그래서 몇 번을 다시 실행해도 안전합니다.
 do $$
 declare
   v_admin_id uuid := '8bc3ac48-a1ea-42ab-8bcb-0a96b60a6eee'; -- 관리자(dddking17) UID
 begin
-  insert into public.user_digimon_ownership (user_id, digimon_id, owned)
-  select v_admin_id, id, true
-  from public.digimons
-  where owned = true
-  on conflict (user_id, digimon_id) do nothing;
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'digimons' and column_name = 'owned'
+  ) then
+    insert into public.user_digimon_ownership (user_id, digimon_id, owned)
+    select v_admin_id, id, true
+    from public.digimons
+    where owned = true
+    on conflict (user_id, digimon_id) do nothing;
+  end if;
 end $$;
 
 -- 4) 이제 필요 없어진 컬럼 정리 → 공용 카탈로그화
