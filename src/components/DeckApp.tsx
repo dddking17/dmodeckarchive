@@ -270,12 +270,18 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
     }
   }
 
-  const filteredDigimons = digimons.filter((d) => {
-    if (ownFilter === "owned" && !isOwned(d.id)) return false;
-    if (ownFilter === "missing" && isOwned(d.id)) return false;
-    if (digimonSearch && !d.name.toLowerCase().includes(digimonSearch.trim().toLowerCase())) return false;
-    return true;
-  });
+  const filteredDigimons = digimons
+    .filter((d) => {
+      if (ownFilter === "owned" && !isOwned(d.id)) return false;
+      if (ownFilter === "missing" && isOwned(d.id)) return false;
+      if (digimonSearch && !d.name.toLowerCase().includes(digimonSearch.trim().toLowerCase())) return false;
+      return true;
+    })
+    // U등급을 앞쪽에, 그 안에서는 이름순(가나다)으로 정렬
+    .sort((a, b) => {
+      if (a.is_u_grade !== b.is_u_grade) return a.is_u_grade ? -1 : 1;
+      return a.name.localeCompare(b.name, "ko");
+    });
 
   const pickerList = digimons.filter(
     (d) => !pickerSearch || d.name.toLowerCase().includes(pickerSearch.trim().toLowerCase())
