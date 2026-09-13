@@ -89,10 +89,30 @@ create policy "ownership_delete_own" on public.user_digimon_ownership
   for delete using (auth.uid() = user_id);
 
 -- ── 실시간 동기화 ─────────────────────────────────────────────
--- 이미 등록되어 있으면 "already member of publication" 에러가 뜨는데 정상입니다 (무시하세요).
-alter publication supabase_realtime add table public.digimons;
-alter publication supabase_realtime add table public.decks;
-alter publication supabase_realtime add table public.user_digimon_ownership;
+-- 이미 등록되어 있으면 건너뛰도록 안전장치를 둬서, 여러 번 실행해도 에러 없이 안전합니다.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'digimons'
+  ) then
+    alter publication supabase_realtime add table public.digimons;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'decks'
+  ) then
+    alter publication supabase_realtime add table public.decks;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'user_digimon_ownership'
+  ) then
+    alter publication supabase_realtime add table public.user_digimon_ownership;
+  end if;
+end $$;
 
 -- ── 디지몬 이미지 저장소 (카탈로그이므로 업로드는 관리자만) ─────
 insert into storage.buckets (id, name, public)
