@@ -8,6 +8,7 @@ import {
   deleteDigimon,
   fetchDecks,
   fetchDigimons,
+  fetchOwnership,
   removeDigimonFromAllDecks,
   setDigimonOwned,
   uploadDigimonImage,
@@ -18,6 +19,7 @@ import type { Deck, Digimon, Tier } from "@/lib/types";
 import { avatarColor, initials } from "@/lib/utils";
 
 const TIERS: Tier[] = ["S", "A", "B", "C", "D"];
+const ADMIN_USER_ID = process.env.NEXT_PUBLIC_ADMIN_USER_ID;
 
 type Props = {
   userId: string;
@@ -38,20 +40,21 @@ type DeckFormState = {
 type DigimonFormState = {
   id: string | null;
   name: string;
-  owned: boolean;
   imageUrl: string | null;
   imageFile: File | null;
 };
 
 const emptyDeckForm: DeckFormState = { id: null, name: "", tier: "A", description: "", effect: "", memberIds: [] };
-const emptyDigimonForm: DigimonFormState = { id: null, name: "", owned: false, imageUrl: null, imageFile: null };
+const emptyDigimonForm: DigimonFormState = { id: null, name: "", imageUrl: null, imageFile: null };
 
 export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: Props) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
+  const isAdmin = !!ADMIN_USER_ID && userId === ADMIN_USER_ID;
 
   const [digimons, setDigimons] = useState<Digimon[]>([]);
   const [decks, setDecks] = useState<Deck[]>([]);
+  const [ownership, setOwnership] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -72,6 +75,8 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
 
   const [digimonModalOpen, setDigimonModalOpen] = useState(false);
   const [digimonForm, setDigimonForm] = useState<DigimonFormState>(emptyDigimonForm);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
 
   // ---------- theme ----------
   useEffect(() => {
@@ -95,9 +100,10 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [d, k] = await Promise.all([fetchDigimons(supabase, userId), fetchDecks(supabase, userId)]);
+      const [d, k, o] = await Promise.all([fetchDigimons(supabase), fetchDecks(supabase), fetchOwnership(supabase, userId)]);
       setDigimons(d);
       setDecks(k);
+      setOwnership(o);
       setErrorMsg(null);
     } catch (err) {
       console.error(err);
@@ -111,16 +117,23 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
     loadAll();
   }, [loadAll]);
 
-  // ---------- realtime: 다른 기기의 변경사항을 즉시 반영 ----------
+  // ---------- realtime: 카탈로그 변경 + 내 보유 여부 변경을 즉시 반영 ----------
   useEffect(() => {
     const channel = supabase
       .channel("deck-archive-changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "digimons", filter: `user_id=eq.${userId}` }, () => {
-        fetchDigimons(supabase, userId).then(setDigimons).catch(() => {});
+      .on("postgres_changes", { event: "*", schema: "public", table: "digimons" }, () => {
+        fetchDigimons(supabase).then(setDigimons).catch(() => {});
       })
-      .on("postgres_changes", { event: "*", schema: "public", table: "decks", filter: `user_id=eq.${userId}` }, () => {
-        fetchDecks(supabase, userId).then(setDecks).catch(() => {});
+      .on("postgres_changes", { event: "*", schema: "public", table: "decks" }, () => {
+        fetchDecks(supabase).then(setDecks).catch(() => {});
       })
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "user_digimon_ownership", filter: `user_id=eq.${userId}` },
+        () => {
+          fetchOwnership(supabase, userId).then(setOwnership).catch(() => {});
+        }
+      )
       .subscribe();
 
     return () => {
@@ -129,9 +142,13 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
   }, [supabase, userId]);
 
   // ---------- derived ----------
+  function isOwned(digimonId: string) {
+    return !!ownership[digimonId];
+  }
+
   function deckStatus(deck: Deck) {
     const total = deck.member_ids.length;
-    const owned = deck.member_ids.filter((id) => digimons.find((d) => d.id === id)?.owned).length;
+    const owned = deck.member_ids.filter((id) => isOwned(id)).length;
     const percent = total > 0 ? Math.round((owned / total) * 100) : 0;
     return { owned, total, ready: total > 0 && owned === total, percent };
   }
@@ -145,7 +162,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
   }
 
   const readyCount = decks.filter((d) => deckStatus(d).ready).length;
-  const ownedCount = digimons.filter((d) => d.owned).length;
+  const ownedCount = digimons.filter((d) => isOwned(d.id)).length;
 
   const filteredDecks = decks.filter((deck) => {
     if (tierFilter !== "all" && deck.tier !== tierFilter) return false;
@@ -160,8 +177,8 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
   });
 
   const filteredDigimons = digimons.filter((d) => {
-    if (ownFilter === "owned" && !d.owned) return false;
-    if (ownFilter === "missing" && d.owned) return false;
+    if (ownFilter === "owned" && !isOwned(d.id)) return false;
+    if (ownFilter === "missing" && isOwned(d.id)) return false;
     if (digimonSearch && !d.name.toLowerCase().includes(digimonSearch.trim().toLowerCase())) return false;
     return true;
   });
@@ -170,7 +187,20 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
     (d) => !pickerSearch || d.name.toLowerCase().includes(pickerSearch.trim().toLowerCase())
   );
 
-  // ---------- deck handlers ----------
+  // ---------- 보유 토글 (모든 사용자 가능) ----------
+  async function handleToggleOwned(digimon: Digimon) {
+    const next = !isOwned(digimon.id);
+    setOwnership((prev) => ({ ...prev, [digimon.id]: next }));
+    try {
+      await setDigimonOwned(supabase, userId, digimon.id, next);
+    } catch (err) {
+      console.error(err);
+      setOwnership((prev) => ({ ...prev, [digimon.id]: !next }));
+      setErrorMsg("보유 상태 변경에 실패했습니다.");
+    }
+  }
+
+  // ---------- 덱 카탈로그 관리 (관리자 전용) ----------
   function openDeckModal(deck: Deck | null) {
     setDeckForm(
       deck
@@ -193,7 +223,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
     const name = deckForm.name.trim();
     if (!name) return;
     try {
-      const saved = await upsertDeck(supabase, userId, {
+      const saved = await upsertDeck(supabase, {
         id: deckForm.id ?? undefined,
         name,
         tier: deckForm.tier,
@@ -213,7 +243,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
   }
 
   async function handleDeleteDeck(id: string, name: string) {
-    if (!window.confirm(`"${name}" 덱을 삭제할까요?`)) return;
+    if (!window.confirm(`"${name}" 덱을 삭제할까요? (카탈로그에서 삭제되어 모든 사용자에게 사라집니다)`)) return;
     try {
       await deleteDeck(supabase, id);
       setDecks((prev) => prev.filter((d) => d.id !== id));
@@ -236,7 +266,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
     const name = quickAddName.trim();
     if (!name) return;
     try {
-      const created = await upsertDigimon(supabase, userId, { name, owned: false });
+      const created = await upsertDigimon(supabase, { name });
       setDigimons((prev) => [...prev, created]);
       setDeckForm((prev) => ({ ...prev, memberIds: [...prev.memberIds, created.id] }));
       setQuickAddName("");
@@ -246,10 +276,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
     }
   }
 
-  // ---------- digimon handlers ----------
-  const [uploadingImage, setUploadingImage] = useState(false);
-  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
-
+  // ---------- 디지몬 카탈로그 관리 (관리자 전용) ----------
   useEffect(() => {
     if (!digimonForm.imageFile) {
       setImagePreviewUrl(null);
@@ -262,9 +289,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
 
   function openDigimonModal(digimon: Digimon | null) {
     setDigimonForm(
-      digimon
-        ? { id: digimon.id, name: digimon.name, owned: digimon.owned, imageUrl: digimon.image_url, imageFile: null }
-        : emptyDigimonForm
+      digimon ? { id: digimon.id, name: digimon.name, imageUrl: digimon.image_url, imageFile: null } : emptyDigimonForm
     );
     setDigimonModalOpen(true);
   }
@@ -276,14 +301,9 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
     try {
       let imageUrl = digimonForm.imageUrl;
       if (digimonForm.imageFile) {
-        imageUrl = await uploadDigimonImage(supabase, userId, digimonForm.imageFile);
+        imageUrl = await uploadDigimonImage(supabase, digimonForm.imageFile);
       }
-      const saved = await upsertDigimon(supabase, userId, {
-        id: digimonForm.id ?? undefined,
-        name,
-        owned: digimonForm.owned,
-        image_url: imageUrl,
-      });
+      const saved = await upsertDigimon(supabase, { id: digimonForm.id ?? undefined, name, image_url: imageUrl });
       setDigimons((prev) => {
         const exists = prev.some((d) => d.id === saved.id);
         return exists ? prev.map((d) => (d.id === saved.id ? saved : d)) : [...prev, saved];
@@ -300,8 +320,8 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
   async function handleDeleteDigimon(id: string, name: string) {
     const uses = usageCount(id);
     const msg = uses > 0
-      ? `"${name}"은(는) ${uses}개 덱에서 사용 중입니다. 삭제하면 해당 덱에서도 제거됩니다. 계속할까요?`
-      : `"${name}"을(를) 삭제할까요?`;
+      ? `"${name}"은(는) ${uses}개 덱에서 사용 중입니다. 삭제하면 해당 덱에서도 제거되고 카탈로그에서 완전히 사라집니다. 계속할까요?`
+      : `"${name}"을(를) 카탈로그에서 삭제할까요?`;
     if (!window.confirm(msg)) return;
     try {
       await removeDigimonFromAllDecks(supabase, decks, id);
@@ -311,18 +331,6 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
     } catch (err) {
       console.error(err);
       setErrorMsg("디지몬 삭제에 실패했습니다.");
-    }
-  }
-
-  async function handleToggleOwned(digimon: Digimon) {
-    const next = !digimon.owned;
-    setDigimons((prev) => prev.map((d) => (d.id === digimon.id ? { ...d, owned: next } : d)));
-    try {
-      await setDigimonOwned(supabase, digimon.id, next);
-    } catch (err) {
-      console.error(err);
-      setDigimons((prev) => prev.map((d) => (d.id === digimon.id ? { ...d, owned: !next } : d)));
-      setErrorMsg("보유 상태 변경에 실패했습니다.");
     }
   }
 
@@ -391,14 +399,14 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
               <option value="ready">편성 가능</option>
               <option value="incomplete">미완성</option>
             </select>
-            <button className="btn primary" onClick={() => openDeckModal(null)}>+ 새 덱</button>
+            {isAdmin && <button className="btn primary" onClick={() => openDeckModal(null)}>+ 새 덱</button>}
           </div>
 
           <div className="deck-grid">
             {filteredDecks.length === 0 ? (
               <div className="empty-state">
                 <p>{decks.length === 0 ? "아직 등록된 덱이 없습니다." : "조건에 맞는 덱이 없습니다."}</p>
-                <button className="btn primary" onClick={() => openDeckModal(null)}>+ 새 덱 만들기</button>
+                {isAdmin && <button className="btn primary" onClick={() => openDeckModal(null)}>+ 새 덱 만들기</button>}
               </div>
             ) : (
               filteredDecks.map((deck) => {
@@ -423,10 +431,12 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                           </div>
                         </span>
                       </div>
-                      <div className="card-actions">
-                        <button className="icon-btn" title="수정" aria-label="덱 수정" onClick={() => openDeckModal(deck)}>✎</button>
-                        <button className="icon-btn danger" title="삭제" aria-label="덱 삭제" onClick={() => handleDeleteDeck(deck.id, deck.name)}>🗑</button>
-                      </div>
+                      {isAdmin && (
+                        <div className="card-actions">
+                          <button className="icon-btn" title="수정" aria-label="덱 수정" onClick={() => openDeckModal(deck)}>✎</button>
+                          <button className="icon-btn danger" title="삭제" aria-label="덱 삭제" onClick={() => handleDeleteDeck(deck.id, deck.name)}>🗑</button>
+                        </div>
+                      )}
                     </div>
                     <div className="member-row">
                       {deck.member_ids.length === 0 ? (
@@ -435,12 +445,13 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                         deck.member_ids.map((id) => {
                           const d = digimonById(id);
                           if (!d) return null;
+                          const owned = isOwned(id);
                           return (
                             <span
                               key={id}
-                              className={`avatar${d.owned ? "" : " is-missing"}`}
-                              style={d.owned && !d.image_url ? { background: avatarColor(d.name) } : undefined}
-                              title={`${d.name}${d.owned ? " (보유)" : " (미보유)"}`}
+                              className={`avatar${owned ? "" : " is-missing"}`}
+                              style={owned && !d.image_url ? { background: avatarColor(d.name) } : undefined}
+                              title={`${d.name}${owned ? " (보유)" : " (미보유)"}`}
                             >
                               {d.image_url ? <img src={d.image_url} alt={d.name} /> : initials(d.name)}
                             </span>
@@ -475,45 +486,50 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
               <option value="owned">보유</option>
               <option value="missing">미보유</option>
             </select>
-            <button className="btn primary" onClick={() => openDigimonModal(null)}>+ 새 디지몬</button>
+            {isAdmin && <button className="btn primary" onClick={() => openDigimonModal(null)}>+ 새 디지몬</button>}
           </div>
 
           <div className="digimon-grid">
             {filteredDigimons.length === 0 ? (
               <div className="empty-state">
                 <p>{digimons.length === 0 ? "아직 등록된 디지몬이 없습니다." : "조건에 맞는 디지몬이 없습니다."}</p>
-                <button className="btn primary" onClick={() => openDigimonModal(null)}>+ 새 디지몬 추가</button>
+                {isAdmin && <button className="btn primary" onClick={() => openDigimonModal(null)}>+ 새 디지몬 추가</button>}
               </div>
             ) : (
-              filteredDigimons.map((d) => (
-                <div key={d.id} className="digimon-card">
-                  <span
-                    className={`avatar${d.owned ? "" : " is-missing"}`}
-                    style={d.owned && !d.image_url ? { background: avatarColor(d.name) } : undefined}
-                  >
-                    {d.image_url ? <img src={d.image_url} alt={d.name} /> : initials(d.name)}
-                  </span>
-                  <div className="digimon-info">
-                    <div className="dname">{d.name}</div>
-                    <div className="duse">{usageCount(d.id)}개 덱에 사용됨</div>
+              filteredDigimons.map((d) => {
+                const owned = isOwned(d.id);
+                return (
+                  <div key={d.id} className="digimon-card">
+                    <span
+                      className={`avatar${owned ? "" : " is-missing"}`}
+                      style={owned && !d.image_url ? { background: avatarColor(d.name) } : undefined}
+                    >
+                      {d.image_url ? <img src={d.image_url} alt={d.name} /> : initials(d.name)}
+                    </span>
+                    <div className="digimon-info">
+                      <div className="dname">{d.name}</div>
+                      <div className="duse">{usageCount(d.id)}개 덱에 사용됨</div>
+                    </div>
+                    <div className="digimon-card-actions">
+                      <label className="switch" title="보유 여부 전환">
+                        <input type="checkbox" checked={owned} onChange={() => handleToggleOwned(d)} aria-label={`${d.name} 보유 여부`} />
+                        <span className="switch-track" />
+                      </label>
+                      {isAdmin && (
+                        <button className="icon-btn" title="수정" aria-label="디지몬 수정" onClick={() => openDigimonModal(d)}>✎</button>
+                      )}
+                    </div>
                   </div>
-                  <div className="digimon-card-actions">
-                    <label className="switch" title="보유 여부 전환">
-                      <input type="checkbox" checked={d.owned} onChange={() => handleToggleOwned(d)} aria-label={`${d.name} 보유 여부`} />
-                      <span className="switch-track" />
-                    </label>
-                    <button className="icon-btn" title="수정" aria-label="디지몬 수정" onClick={() => openDigimonModal(d)}>✎</button>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </section>
       )}
 
-      <p className="footer">로그인한 구글 계정 기준으로 자동 저장되며, 어떤 기기에서 열어도 같은 데이터를 볼 수 있습니다.</p>
+      <p className="footer">덱/디지몬 목록은 모두에게 공통이며, 보유 여부만 로그인한 계정별로 저장됩니다.</p>
 
-      {deckModalOpen && (
+      {isAdmin && deckModalOpen && (
         <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setDeckModalOpen(false); }}>
           <div className="modal" role="dialog" aria-modal="true">
             <h2>{deckForm.id ? "덱 수정" : "새 덱"}</h2>
@@ -578,7 +594,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                         <span className="avatar mini-avatar" style={d.image_url ? undefined : { background: avatarColor(d.name) }}>
                           {d.image_url ? <img src={d.image_url} alt="" /> : initials(d.name)}
                         </span>
-                        {d.name}{!d.owned && " ⋅ 미보유"}
+                        {d.name}
                       </button>
                     );
                   })
@@ -613,7 +629,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
         </div>
       )}
 
-      {digimonModalOpen && (
+      {isAdmin && digimonModalOpen && (
         <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setDigimonModalOpen(false); }}>
           <div className="modal" role="dialog" aria-modal="true" style={{ maxWidth: 400 }}>
             <h2>{digimonForm.id ? "디지몬 수정" : "새 디지몬"}</h2>
@@ -655,23 +671,12 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                 </div>
               </div>
             </div>
-            <div className="field" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <label htmlFor="digimonOwned" style={{ margin: 0 }}>보유 중</label>
-              <label className="switch">
-                <input
-                  id="digimonOwned"
-                  type="checkbox"
-                  checked={digimonForm.owned}
-                  onChange={(e) => setDigimonForm((p) => ({ ...p, owned: e.target.checked }))}
-                />
-                <span className="switch-track" />
-              </label>
-            </div>
             <div className="modal-actions">
               {digimonForm.id && (
                 <button
                   className="btn danger-outline"
                   onClick={() => { const id = digimonForm.id!; const name = digimonForm.name; setDigimonModalOpen(false); handleDeleteDigimon(id, name); }}
+                  disabled={uploadingImage}
                 >
                   삭제
                 </button>

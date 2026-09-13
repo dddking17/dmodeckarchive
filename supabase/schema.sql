@@ -1,25 +1,23 @@
--- 디지몬 덱 아카이브 — Supabase 데이터베이스 스키마
+-- 디지몬 덱 아카이브 — Supabase 데이터베이스 스키마 (v2: 공용 카탈로그 구조)
 -- Supabase 대시보드 → SQL Editor 에서 이 파일 전체를 붙여넣고 실행하세요.
+--
+-- 구조: 덱/디지몬 목록은 모든 로그인 사용자에게 공통으로 보이는 "카탈로그"이고,
+-- 카탈로그를 추가/수정/삭제할 수 있는 사람은 관리자(ADMIN_USER_ID) 한 명뿐입니다.
+-- "보유 여부"만 로그인한 사용자 각자 별도로 저장됩니다.
 
 create extension if not exists "pgcrypto";
 
--- ── 디지몬 보관함 ─────────────────────────────────────────
+-- ── 디지몬 카탈로그 (전체 공용) ───────────────────────────────
 create table if not exists public.digimons (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
   name text not null check (char_length(trim(name)) > 0),
-  owned boolean not null default false,
   image_url text,
   created_at timestamptz not null default now()
 );
 
--- 기존에 만든 테이블에 새 컬럼만 추가하는 경우를 위한 안전장치
-alter table public.digimons add column if not exists image_url text;
-
--- ── 덱 목록 ───────────────────────────────────────────────
+-- ── 덱 카탈로그 (전체 공용) ───────────────────────────────────
 create table if not exists public.decks (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
   name text not null check (char_length(trim(name)) > 0),
   tier text not null check (tier in ('S', 'A', 'B', 'C', 'D')),
   description text not null default '',
@@ -28,82 +26,94 @@ create table if not exists public.decks (
   created_at timestamptz not null default now()
 );
 
-alter table public.decks add column if not exists description text not null default '';
+-- ── 사용자별 보유 여부 ────────────────────────────────────────
+create table if not exists public.user_digimon_ownership (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  digimon_id uuid not null references public.digimons(id) on delete cascade,
+  owned boolean not null default true,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, digimon_id)
+);
 
-create index if not exists digimons_user_id_idx on public.digimons(user_id);
-create index if not exists decks_user_id_idx on public.decks(user_id);
+create index if not exists decks_name_idx on public.decks(name);
+create index if not exists ownership_user_idx on public.user_digimon_ownership(user_id);
 
--- ── RLS: 본인 데이터만 읽고 쓸 수 있도록 제한 ───────────────
+-- ── RLS ──────────────────────────────────────────────────────
 alter table public.digimons enable row level security;
 alter table public.decks enable row level security;
+alter table public.user_digimon_ownership enable row level security;
 
-drop policy if exists "digimons_select_own" on public.digimons;
-create policy "digimons_select_own" on public.digimons
+-- 관리자 UID: dddking17 계정으로 고정됨 (8bc3ac48-a1ea-42ab-8bcb-0a96b60a6eee)
+
+-- 카탈로그 읽기: 로그인한 사람이면 누구나
+drop policy if exists "digimons_read_all" on public.digimons;
+create policy "digimons_read_all" on public.digimons for select using (auth.uid() is not null);
+drop policy if exists "decks_read_all" on public.decks;
+create policy "decks_read_all" on public.decks for select using (auth.uid() is not null);
+
+-- 카탈로그 쓰기: 관리자만
+drop policy if exists "digimons_admin_insert" on public.digimons;
+create policy "digimons_admin_insert" on public.digimons for insert
+  with check (auth.uid() = '8bc3ac48-a1ea-42ab-8bcb-0a96b60a6eee'::uuid);
+drop policy if exists "digimons_admin_update" on public.digimons;
+create policy "digimons_admin_update" on public.digimons for update
+  using (auth.uid() = '8bc3ac48-a1ea-42ab-8bcb-0a96b60a6eee'::uuid)
+  with check (auth.uid() = '8bc3ac48-a1ea-42ab-8bcb-0a96b60a6eee'::uuid);
+drop policy if exists "digimons_admin_delete" on public.digimons;
+create policy "digimons_admin_delete" on public.digimons for delete
+  using (auth.uid() = '8bc3ac48-a1ea-42ab-8bcb-0a96b60a6eee'::uuid);
+
+drop policy if exists "decks_admin_insert" on public.decks;
+create policy "decks_admin_insert" on public.decks for insert
+  with check (auth.uid() = '8bc3ac48-a1ea-42ab-8bcb-0a96b60a6eee'::uuid);
+drop policy if exists "decks_admin_update" on public.decks;
+create policy "decks_admin_update" on public.decks for update
+  using (auth.uid() = '8bc3ac48-a1ea-42ab-8bcb-0a96b60a6eee'::uuid)
+  with check (auth.uid() = '8bc3ac48-a1ea-42ab-8bcb-0a96b60a6eee'::uuid);
+drop policy if exists "decks_admin_delete" on public.decks;
+create policy "decks_admin_delete" on public.decks for delete
+  using (auth.uid() = '8bc3ac48-a1ea-42ab-8bcb-0a96b60a6eee'::uuid);
+
+-- 보유 여부: 각자 자기 것만 읽고 쓸 수 있음
+drop policy if exists "ownership_select_own" on public.user_digimon_ownership;
+create policy "ownership_select_own" on public.user_digimon_ownership
   for select using (auth.uid() = user_id);
-
-drop policy if exists "digimons_insert_own" on public.digimons;
-create policy "digimons_insert_own" on public.digimons
+drop policy if exists "ownership_insert_own" on public.user_digimon_ownership;
+create policy "ownership_insert_own" on public.user_digimon_ownership
   for insert with check (auth.uid() = user_id);
-
-drop policy if exists "digimons_update_own" on public.digimons;
-create policy "digimons_update_own" on public.digimons
+drop policy if exists "ownership_update_own" on public.user_digimon_ownership;
+create policy "ownership_update_own" on public.user_digimon_ownership
   for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
-
-drop policy if exists "digimons_delete_own" on public.digimons;
-create policy "digimons_delete_own" on public.digimons
+drop policy if exists "ownership_delete_own" on public.user_digimon_ownership;
+create policy "ownership_delete_own" on public.user_digimon_ownership
   for delete using (auth.uid() = user_id);
 
-drop policy if exists "decks_select_own" on public.decks;
-create policy "decks_select_own" on public.decks
-  for select using (auth.uid() = user_id);
-
-drop policy if exists "decks_insert_own" on public.decks;
-create policy "decks_insert_own" on public.decks
-  for insert with check (auth.uid() = user_id);
-
-drop policy if exists "decks_update_own" on public.decks;
-create policy "decks_update_own" on public.decks
-  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
-
-drop policy if exists "decks_delete_own" on public.decks;
-create policy "decks_delete_own" on public.decks
-  for delete using (auth.uid() = user_id);
-
--- ── 실시간 동기화: 다른 기기에서의 변경을 즉시 반영 ─────────
--- 이미 등록되어 있으면 "already member of publication" 에러가 뜨는데,
--- 정상입니다 (이미 설정 완료라는 뜻) — 무시하고 넘어가세요.
+-- ── 실시간 동기화 ─────────────────────────────────────────────
+-- 이미 등록되어 있으면 "already member of publication" 에러가 뜨는데 정상입니다 (무시하세요).
 alter publication supabase_realtime add table public.digimons;
 alter publication supabase_realtime add table public.decks;
+alter publication supabase_realtime add table public.user_digimon_ownership;
 
--- ── 디지몬 이미지 저장소 ─────────────────────────────────────
--- 버킷을 대시보드(Storage → New bucket)에서 이미 만들었다면 이 insert는 건너뛰어도 됩니다.
+-- ── 디지몬 이미지 저장소 (카탈로그이므로 업로드는 관리자만) ─────
 insert into storage.buckets (id, name, public)
 values ('digimon-images', 'digimon-images', true)
 on conflict (id) do nothing;
 
--- 이미지는 누구나 볼 수 있어야 하므로(<img> 태그로 그냥 불러오는 용도) 읽기는 공개,
--- 업로드/수정/삭제는 "자기 폴더(user_id/파일명)"에만 가능하도록 제한합니다.
 drop policy if exists "digimon_images_public_read" on storage.objects;
 create policy "digimon_images_public_read" on storage.objects
   for select using (bucket_id = 'digimon-images');
 
 drop policy if exists "digimon_images_own_insert" on storage.objects;
-create policy "digimon_images_own_insert" on storage.objects
-  for insert with check (
-    bucket_id = 'digimon-images'
-    and auth.uid()::text = (storage.foldername(name))[1]
-  );
+drop policy if exists "digimon_images_admin_insert" on storage.objects;
+create policy "digimon_images_admin_insert" on storage.objects
+  for insert with check (bucket_id = 'digimon-images' and auth.uid() = '8bc3ac48-a1ea-42ab-8bcb-0a96b60a6eee'::uuid);
 
 drop policy if exists "digimon_images_own_update" on storage.objects;
-create policy "digimon_images_own_update" on storage.objects
-  for update using (
-    bucket_id = 'digimon-images'
-    and auth.uid()::text = (storage.foldername(name))[1]
-  );
+drop policy if exists "digimon_images_admin_update" on storage.objects;
+create policy "digimon_images_admin_update" on storage.objects
+  for update using (bucket_id = 'digimon-images' and auth.uid() = '8bc3ac48-a1ea-42ab-8bcb-0a96b60a6eee'::uuid);
 
 drop policy if exists "digimon_images_own_delete" on storage.objects;
-create policy "digimon_images_own_delete" on storage.objects
-  for delete using (
-    bucket_id = 'digimon-images'
-    and auth.uid()::text = (storage.foldername(name))[1]
-  );
+drop policy if exists "digimon_images_admin_delete" on storage.objects;
+create policy "digimon_images_admin_delete" on storage.objects
+  for delete using (bucket_id = 'digimon-images' and auth.uid() = '8bc3ac48-a1ea-42ab-8bcb-0a96b60a6eee'::uuid);
