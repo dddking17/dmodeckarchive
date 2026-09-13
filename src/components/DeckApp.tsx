@@ -8,8 +8,10 @@ import {
   deleteDigimon,
   fetchDecks,
   fetchDigimons,
+  fetchFavoriteDeckIds,
   fetchOwnership,
   removeDigimonFromAllDecks,
+  setDeckFavorite,
   setDigimonOwned,
   uploadDigimonImage,
   upsertDeck,
@@ -67,6 +69,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
   const [digimons, setDigimons] = useState<Digimon[]>([]);
   const [decks, setDecks] = useState<Deck[]>([]);
   const [ownership, setOwnership] = useState<Record<string, boolean>>({});
+  const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -76,7 +79,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
   const [deckSearch, setDeckSearch] = useState("");
   const [tierFilter, setTierFilter] = useState<"all" | Tier>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "ready" | "incomplete">("all");
-  const [deckSort, setDeckSort] = useState<"name" | "tier" | "ownedCount" | "ownedUCount">("name");
+  const [deckSort, setDeckSort] = useState<"default" | "name" | "tier" | "ownedCount" | "ownedUCount">("default");
 
   const [digimonSearch, setDigimonSearch] = useState("");
   const [ownFilter, setOwnFilter] = useState<"all" | "owned" | "missing">("all");
@@ -113,10 +116,16 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [d, k, o] = await Promise.all([fetchDigimons(supabase), fetchDecks(supabase), fetchOwnership(supabase, userId)]);
+      const [d, k, o, f] = await Promise.all([
+        fetchDigimons(supabase),
+        fetchDecks(supabase),
+        fetchOwnership(supabase, userId),
+        fetchFavoriteDeckIds(supabase, userId),
+      ]);
       setDigimons(d);
       setDecks(k);
       setOwnership(o);
+      setFavorites(new Set(f));
       setErrorMsg(null);
     } catch (err) {
       console.error(err);
@@ -145,6 +154,13 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
         { event: "*", schema: "public", table: "user_digimon_ownership", filter: `user_id=eq.${userId}` },
         () => {
           fetchOwnership(supabase, userId).then(setOwnership).catch(() => {});
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "user_deck_favorites", filter: `user_id=eq.${userId}` },
+        () => {
+          fetchFavoriteDeckIds(supabase, userId).then((f) => setFavorites(new Set(f))).catch(() => {});
         }
       )
       .subscribe();
@@ -191,6 +207,10 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
 
   const TIER_RANK: Record<Tier, number> = { S: 0, A: 1, B: 2, C: 3, D: 4 };
 
+  function isFavorite(deckId: string) {
+    return favorites.has(deckId);
+  }
+
   function compareDecks(a: Deck, b: Deck) {
     switch (deckSort) {
       case "tier":
@@ -200,28 +220,55 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
       case "ownedUCount":
         return uOwnedCount(b) - uOwnedCount(a);
       case "name":
-      default:
         return a.name.localeCompare(b.name, "ko");
+      case "default":
+      default:
+        return a.order_index - b.order_index;
     }
   }
 
   const readyCount = decks.filter((d) => deckStatus(d).ready).length;
   const ownedCount = digimons.filter((d) => isOwned(d.id)).length;
 
-  const filteredDecks = decks
-    .filter((deck) => {
-      if (tierFilter !== "all" && deck.tier !== tierFilter) return false;
-      const st = deckStatus(deck);
-      if (statusFilter === "ready" && !st.ready) return false;
-      if (statusFilter === "incomplete" && st.ready) return false;
-      if (deckSearch) {
-        const memberNames = deck.member_ids.map((id) => digimonById(id)?.name ?? "").join(" ");
-        const hay = (deck.name + " " + deck.description + " " + deck.effect + " " + memberNames).toLowerCase();
-        if (!hay.includes(deckSearch.trim().toLowerCase())) return false;
-      }
-      return true;
-    })
-    .sort(compareDecks);
+  const filteredDecksBase = decks.filter((deck) => {
+    if (tierFilter !== "all" && deck.tier !== tierFilter) return false;
+    const st = deckStatus(deck);
+    if (statusFilter === "ready" && !st.ready) return false;
+    if (statusFilter === "incomplete" && st.ready) return false;
+    if (deckSearch) {
+      const memberNames = deck.member_ids.map((id) => digimonById(id)?.name ?? "").join(" ");
+      const hay = (deck.name + " " + deck.description + " " + deck.effect + " " + memberNames).toLowerCase();
+      if (!hay.includes(deckSearch.trim().toLowerCase())) return false;
+    }
+    return true;
+  });
+
+  // 즐겨찾기한 덱은 정렬 기준과 무관하게 항상 최상단, 그 안에서는 메모장 순서(원본 순서)로 정렬.
+  // 즐겨찾기하지 않은 나머지는 선택한 정렬 기준을 따릅니다.
+  const filteredDecks = [
+    ...filteredDecksBase.filter((d) => isFavorite(d.id)).sort((a, b) => a.order_index - b.order_index),
+    ...filteredDecksBase.filter((d) => !isFavorite(d.id)).sort(compareDecks),
+  ];
+
+  async function handleToggleFavorite(deckId: string) {
+    const next = !isFavorite(deckId);
+    setFavorites((prev) => {
+      const copy = new Set(prev);
+      if (next) copy.add(deckId); else copy.delete(deckId);
+      return copy;
+    });
+    try {
+      await setDeckFavorite(supabase, userId, deckId, next);
+    } catch (err) {
+      console.error(err);
+      setFavorites((prev) => {
+        const copy = new Set(prev);
+        if (next) copy.delete(deckId); else copy.add(deckId);
+        return copy;
+      });
+      setErrorMsg("즐겨찾기 변경에 실패했습니다.");
+    }
+  }
 
   const filteredDigimons = digimons.filter((d) => {
     if (ownFilter === "owned" && !isOwned(d.id)) return false;
@@ -454,6 +501,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
               <option value="incomplete">미완성</option>
             </select>
             <select value={deckSort} onChange={(e) => setDeckSort(e.target.value as any)} aria-label="정렬 기준">
+              <option value="default">기본 순서</option>
               <option value="name">이름순</option>
               <option value="tier">티어순</option>
               <option value="ownedCount">보유 디지몬 수</option>
@@ -475,6 +523,15 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                   <article key={deck.id} className={`deck-card tier-${deck.tier}${st.ready ? " is-ready" : ""}`}>
                     <div className="deck-card-head">
                       <div className="deck-name-row">
+                        <button
+                          type="button"
+                          className={`star-btn${isFavorite(deck.id) ? " is-fav" : ""}`}
+                          aria-label={isFavorite(deck.id) ? "즐겨찾기 해제" : "즐겨찾기 추가"}
+                          aria-pressed={isFavorite(deck.id)}
+                          onClick={() => handleToggleFavorite(deck.id)}
+                        >
+                          {isFavorite(deck.id) ? "★" : "☆"}
+                        </button>
                         <span className={`tier-badge tier-${deck.tier}`}>{deck.tier}</span>
                         <span className="deck-name">{deckDisplayName(deck)}</span>
                         <span className="info-wrap">

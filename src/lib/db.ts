@@ -41,6 +41,27 @@ export async function setDigimonOwned(supabase: SupabaseClient, userId: string, 
   if (error) throw error;
 }
 
+/** 로그인한 사용자가 즐겨찾기한 덱 id 목록 */
+export async function fetchFavoriteDeckIds(supabase: SupabaseClient, userId: string) {
+  const { data, error } = await supabase.from("user_deck_favorites").select("deck_id").eq("user_id", userId);
+  if (error) throw error;
+  return (data ?? []).map((row) => row.deck_id as string);
+}
+
+export async function setDeckFavorite(supabase: SupabaseClient, userId: string, deckId: string, favorited: boolean) {
+  if (favorited) {
+    const { error } = await supabase.from("user_deck_favorites").upsert({ user_id: userId, deck_id: deckId });
+    if (error) throw error;
+  } else {
+    const { error } = await supabase
+      .from("user_deck_favorites")
+      .delete()
+      .eq("user_id", userId)
+      .eq("deck_id", deckId);
+    if (error) throw error;
+  }
+}
+
 /** 카탈로그 등록/수정 — 관리자만 성공합니다 */
 export async function upsertDigimon(
   supabase: SupabaseClient,

@@ -20,6 +20,7 @@ export type Deck = {
   description: string;
   effect: string;
   member_ids: string[];
+  order_index: number;
   created_at: string;
 };
 

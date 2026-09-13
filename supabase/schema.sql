@@ -24,7 +24,16 @@ create table if not exists public.decks (
   description text not null default '',
   effect text not null default '',
   member_ids uuid[] not null default '{}',
+  order_index integer not null default 0,
   created_at timestamptz not null default now()
+);
+
+-- ── 사용자별 즐겨찾기 ─────────────────────────────────────────
+create table if not exists public.user_deck_favorites (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  deck_id uuid not null references public.decks(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, deck_id)
 );
 
 -- ── 사용자별 보유 여부 ────────────────────────────────────────
@@ -41,6 +50,7 @@ create table if not exists public.user_digimon_ownership (
 alter table public.digimons add column if not exists image_url text;
 alter table public.digimons add column if not exists is_u_grade boolean not null default false;
 alter table public.decks add column if not exists description text not null default '';
+alter table public.decks add column if not exists order_index integer not null default 0;
 
 create index if not exists decks_name_idx on public.decks(name);
 create index if not exists ownership_user_idx on public.user_digimon_ownership(user_id);
@@ -49,6 +59,7 @@ create index if not exists ownership_user_idx on public.user_digimon_ownership(u
 alter table public.digimons enable row level security;
 alter table public.decks enable row level security;
 alter table public.user_digimon_ownership enable row level security;
+alter table public.user_deck_favorites enable row level security;
 
 -- 관리자 UID: dddking17 계정으로 고정됨 (8bc3ac48-a1ea-42ab-8bcb-0a96b60a6eee)
 
@@ -95,6 +106,17 @@ drop policy if exists "ownership_delete_own" on public.user_digimon_ownership;
 create policy "ownership_delete_own" on public.user_digimon_ownership
   for delete using (auth.uid() = user_id);
 
+-- 즐겨찾기: 각자 자기 것만 읽고 쓸 수 있음
+drop policy if exists "favorites_select_own" on public.user_deck_favorites;
+create policy "favorites_select_own" on public.user_deck_favorites
+  for select using (auth.uid() = user_id);
+drop policy if exists "favorites_insert_own" on public.user_deck_favorites;
+create policy "favorites_insert_own" on public.user_deck_favorites
+  for insert with check (auth.uid() = user_id);
+drop policy if exists "favorites_delete_own" on public.user_deck_favorites;
+create policy "favorites_delete_own" on public.user_deck_favorites
+  for delete using (auth.uid() = user_id);
+
 -- ── 실시간 동기화 ─────────────────────────────────────────────
 -- 이미 등록되어 있으면 건너뛰도록 안전장치를 둬서, 여러 번 실행해도 에러 없이 안전합니다.
 do $$
@@ -118,6 +140,13 @@ begin
     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'user_digimon_ownership'
   ) then
     alter publication supabase_realtime add table public.user_digimon_ownership;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'user_deck_favorites'
+  ) then
+    alter publication supabase_realtime add table public.user_deck_favorites;
   end if;
 end $$;
 
