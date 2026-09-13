@@ -19,6 +19,7 @@ import {
 } from "@/lib/db";
 import type { Deck, Digimon, Tier } from "@/lib/types";
 import { avatarColor, initials, splitAwakenName } from "@/lib/utils";
+import GoogleIcon from "@/components/GoogleIcon";
 
 /** "듀크몬 크림존모드*(각성)" → 일반 텍스트 + 빨간색 "(각성)" 태그로 렌더링 */
 function DigimonName({ name, className }: { name: string; className?: string }) {
@@ -35,7 +36,7 @@ const TIERS: Tier[] = ["S", "A", "B", "C", "D"];
 const ADMIN_USER_ID = process.env.NEXT_PUBLIC_ADMIN_USER_ID;
 
 type Props = {
-  userId: string;
+  userId: string | null;
   userName: string;
   userEmail: string;
   userAvatarUrl: string | null;
@@ -118,8 +119,8 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
       const [d, k, o, f] = await Promise.all([
         fetchDigimons(supabase),
         fetchDecks(supabase),
-        fetchOwnership(supabase, userId),
-        fetchFavoriteDeckIds(supabase, userId),
+        userId ? fetchOwnership(supabase, userId) : Promise.resolve({}),
+        userId ? fetchFavoriteDeckIds(supabase, userId) : Promise.resolve([]),
       ]);
       setDigimons(d);
       setDecks(k);
@@ -140,34 +141,46 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
 
   // ---------- realtime: 카탈로그 변경 + 내 보유 여부 변경을 즉시 반영 ----------
   useEffect(() => {
-    const channel = supabase
+    let channel = supabase
       .channel("deck-archive-changes")
       .on("postgres_changes", { event: "*", schema: "public", table: "digimons" }, () => {
         fetchDigimons(supabase).then(setDigimons).catch(() => {});
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "decks" }, () => {
         fetchDecks(supabase).then(setDecks).catch(() => {});
-      })
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "user_digimon_ownership", filter: `user_id=eq.${userId}` },
-        () => {
-          fetchOwnership(supabase, userId).then(setOwnership).catch(() => {});
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "user_deck_favorites", filter: `user_id=eq.${userId}` },
-        () => {
-          fetchFavoriteDeckIds(supabase, userId).then((f) => setFavorites(new Set(f))).catch(() => {});
-        }
-      )
-      .subscribe();
+      });
+
+    if (userId) {
+      channel = channel
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "user_digimon_ownership", filter: `user_id=eq.${userId}` },
+          () => {
+            fetchOwnership(supabase, userId).then(setOwnership).catch(() => {});
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "user_deck_favorites", filter: `user_id=eq.${userId}` },
+          () => {
+            fetchFavoriteDeckIds(supabase, userId).then((f) => setFavorites(new Set(f))).catch(() => {});
+          }
+        );
+    }
+
+    channel.subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
   }, [supabase, userId]);
+
+  async function handleGoogleLogin() {
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
+    });
+  }
 
   // ---------- derived ----------
   function isOwned(digimonId: string) {
@@ -246,6 +259,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
   ];
 
   async function handleToggleFavorite(deckId: string) {
+    if (!userId) { handleGoogleLogin(); return; }
     const next = !isFavorite(deckId);
     setFavorites((prev) => {
       const copy = new Set(prev);
@@ -284,6 +298,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
 
   // ---------- 보유 토글 (모든 사용자 가능) ----------
   async function handleToggleOwned(digimon: Digimon) {
+    if (!userId) { handleGoogleLogin(); return; }
     const next = !isOwned(digimon.id);
     setOwnership((prev) => ({ ...prev, [digimon.id]: next }));
     try {
@@ -452,7 +467,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
           <span className="brand-mark" aria-hidden="true">👾</span>
           <div className="brand-text">
             <h1>디지몬 덱 아카이브</h1>
-            <p className="tagline">보유 디지몬으로 지금 편성 가능한 덱을 한눈에 확인하세요</p>
+            <p className="tagline">전체 덱 구성과 효과를 한눈에 확인하고, 로그인해서 내 보유 디지몬을 체크해보세요</p>
           </div>
         </div>
         <div className="header-actions">
@@ -467,11 +482,20 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
           <button className="theme-toggle" onClick={toggleTheme} aria-label="테마 전환" title="라이트/다크 전환">
             {theme === "dark" ? "☀️" : "🌙"}
           </button>
-          <div className="user-chip">
-            {userAvatarUrl ? <img src={userAvatarUrl} alt="" /> : null}
-            <span title={userEmail}>{userName || userEmail}</span>
-          </div>
-          <button className="btn" onClick={handleSignOut}>로그아웃</button>
+          {userId ? (
+            <>
+              <div className="user-chip">
+                {userAvatarUrl ? <img src={userAvatarUrl} alt="" /> : null}
+                <span title={userEmail}>{userName || userEmail}</span>
+              </div>
+              <button className="btn" onClick={handleSignOut}>로그아웃</button>
+            </>
+          ) : (
+            <button className="google-btn compact" onClick={handleGoogleLogin}>
+              <GoogleIcon />
+              구글로 로그인
+            </button>
+          )}
         </div>
       </header>
 
@@ -655,7 +679,10 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
         </section>
       )}
 
-      <p className="footer">덱/디지몬 목록은 모두에게 공통이며, 보유 여부만 로그인한 계정별로 저장됩니다.</p>
+      <p className="footer">
+        덱/디지몬 목록은 로그인 없이 누구나 볼 수 있어요.
+        {userId ? " 보유 여부는 이 계정에 저장되어 어떤 기기에서 열어도 유지됩니다." : " 보유 여부를 체크하고 저장하려면 구글 로그인이 필요합니다."}
+      </p>
 
       {isAdmin && deckModalOpen && (
         <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setDeckModalOpen(false); }}>

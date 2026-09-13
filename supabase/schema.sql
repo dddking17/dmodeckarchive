@@ -63,11 +63,11 @@ alter table public.user_deck_favorites enable row level security;
 
 -- 관리자 UID: dddking17 계정으로 고정됨 (8bc3ac48-a1ea-42ab-8bcb-0a96b60a6eee)
 
--- 카탈로그 읽기: 로그인한 사람이면 누구나
+-- 카탈로그 읽기: 로그인 여부와 상관없이 누구나
 drop policy if exists "digimons_read_all" on public.digimons;
-create policy "digimons_read_all" on public.digimons for select using (auth.uid() is not null);
+create policy "digimons_read_all" on public.digimons for select using (true);
 drop policy if exists "decks_read_all" on public.decks;
-create policy "decks_read_all" on public.decks for select using (auth.uid() is not null);
+create policy "decks_read_all" on public.decks for select using (true);
 
 -- 카탈로그 쓰기: 관리자만
 drop policy if exists "digimons_admin_insert" on public.digimons;
