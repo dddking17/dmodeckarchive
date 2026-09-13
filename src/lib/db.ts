@@ -44,10 +44,11 @@ export async function setDigimonOwned(supabase: SupabaseClient, userId: string, 
 /** 카탈로그 등록/수정 — 관리자만 성공합니다 */
 export async function upsertDigimon(
   supabase: SupabaseClient,
-  digimon: { id?: string; name: string; image_url?: string | null }
+  digimon: { id?: string; name: string; image_url?: string | null; is_u_grade?: boolean }
 ) {
   const payload: Record<string, unknown> = { id: digimon.id, name: digimon.name };
   if (digimon.image_url !== undefined) payload.image_url = digimon.image_url;
+  if (digimon.is_u_grade !== undefined) payload.is_u_grade = digimon.is_u_grade;
 
   const { data, error } = await supabase.from("digimons").upsert(payload).select().single();
   if (error) throw error;

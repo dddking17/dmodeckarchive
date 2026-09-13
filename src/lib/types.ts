@@ -5,6 +5,7 @@ export type Digimon = {
   id: string;
   name: string;
   image_url: string | null;
+  is_u_grade: boolean;
   created_at: string;
 };
 

@@ -12,6 +12,7 @@ create table if not exists public.digimons (
   id uuid primary key default gen_random_uuid(),
   name text not null check (char_length(trim(name)) > 0),
   image_url text,
+  is_u_grade boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -38,6 +39,7 @@ create table if not exists public.user_digimon_ownership (
 -- 기존에 이미 만들어져 있던 테이블이라면 create table이 무시되므로,
 -- 누락됐을 수 있는 컬럼을 안전하게 추가합니다.
 alter table public.digimons add column if not exists image_url text;
+alter table public.digimons add column if not exists is_u_grade boolean not null default false;
 alter table public.decks add column if not exists description text not null default '';
 
 create index if not exists decks_name_idx on public.decks(name);

@@ -16,7 +16,18 @@ import {
   upsertDigimon,
 } from "@/lib/db";
 import type { Deck, Digimon, Tier } from "@/lib/types";
-import { avatarColor, initials } from "@/lib/utils";
+import { avatarColor, initials, splitAwakenName } from "@/lib/utils";
+
+/** "듀크몬 크림존모드*(각성)" → 일반 텍스트 + 빨간색 "(각성)" 태그로 렌더링 */
+function DigimonName({ name, className }: { name: string; className?: string }) {
+  const { base, tag } = splitAwakenName(name);
+  return (
+    <span className={className}>
+      {base}
+      {tag && <span className="awaken-tag">{tag}</span>}
+    </span>
+  );
+}
 
 const TIERS: Tier[] = ["S", "A", "B", "C", "D"];
 const ADMIN_USER_ID = process.env.NEXT_PUBLIC_ADMIN_USER_ID;
@@ -42,10 +53,11 @@ type DigimonFormState = {
   name: string;
   imageUrl: string | null;
   imageFile: File | null;
+  isUGrade: boolean;
 };
 
 const emptyDeckForm: DeckFormState = { id: null, name: "", tier: "A", description: "", effect: "", memberIds: [] };
-const emptyDigimonForm: DigimonFormState = { id: null, name: "", imageUrl: null, imageFile: null };
+const emptyDigimonForm: DigimonFormState = { id: null, name: "", imageUrl: null, imageFile: null, isUGrade: false };
 
 export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: Props) {
   const supabase = useMemo(() => createClient(), []);
@@ -155,6 +167,10 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
 
   function usageCount(digimonId: string) {
     return decks.filter((d) => d.member_ids.includes(digimonId)).length;
+  }
+
+  function uGradeCount(deck: Deck) {
+    return deck.member_ids.filter((id) => digimonById(id)?.is_u_grade).length;
   }
 
   function digimonById(id: string) {
@@ -289,7 +305,9 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
 
   function openDigimonModal(digimon: Digimon | null) {
     setDigimonForm(
-      digimon ? { id: digimon.id, name: digimon.name, imageUrl: digimon.image_url, imageFile: null } : emptyDigimonForm
+      digimon
+        ? { id: digimon.id, name: digimon.name, imageUrl: digimon.image_url, imageFile: null, isUGrade: digimon.is_u_grade }
+        : emptyDigimonForm
     );
     setDigimonModalOpen(true);
   }
@@ -303,7 +321,12 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
       if (digimonForm.imageFile) {
         imageUrl = await uploadDigimonImage(supabase, digimonForm.imageFile);
       }
-      const saved = await upsertDigimon(supabase, { id: digimonForm.id ?? undefined, name, image_url: imageUrl });
+      const saved = await upsertDigimon(supabase, {
+        id: digimonForm.id ?? undefined,
+        name,
+        image_url: imageUrl,
+        is_u_grade: digimonForm.isUGrade,
+      });
       setDigimons((prev) => {
         const exists = prev.some((d) => d.id === saved.id);
         return exists ? prev.map((d) => (d.id === saved.id ? saved : d)) : [...prev, saved];
@@ -411,6 +434,7 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
             ) : (
               filteredDecks.map((deck) => {
                 const st = deckStatus(deck);
+                const uCount = uGradeCount(deck);
                 return (
                   <article key={deck.id} className={`deck-card tier-${deck.tier}${st.ready ? " is-ready" : ""}`}>
                     <div className="deck-card-head">
@@ -418,27 +442,28 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                         <span className={`tier-badge tier-${deck.tier}`}>{deck.tier}</span>
                         <span className="deck-name">{deck.name}</span>
                         <span className="info-wrap">
-                          <button type="button" className="info-trigger" aria-label="덱 설명과 효과 보기">i</button>
+                          <button type="button" className="info-trigger" aria-label="덱 설명 보기">ⓘ</button>
                           <div className="info-popover" role="tooltip">
                             <div className="info-section">
                               <h4>설명</h4>
                               {deck.description ? deck.description : <span className="info-empty">등록된 설명이 없습니다</span>}
                             </div>
-                            <div className="info-section">
-                              <h4>효과</h4>
-                              {deck.effect ? deck.effect : <span className="info-empty">등록된 효과가 없습니다</span>}
-                            </div>
                           </div>
                         </span>
                       </div>
-                      {isAdmin && (
-                        <div className="card-actions">
-                          <button className="icon-btn" title="수정" aria-label="덱 수정" onClick={() => openDeckModal(deck)}>✎</button>
-                          <button className="icon-btn danger" title="삭제" aria-label="덱 삭제" onClick={() => handleDeleteDeck(deck.id, deck.name)}>🗑</button>
-                        </div>
-                      )}
+                      <div className="deck-head-right">
+                        <span className={`u-grade-badge${uCount > 0 ? " has-u" : ""}`} title="덱에 사용된 U등급 디지몬 수">
+                          {uCount}U
+                        </span>
+                        {isAdmin && (
+                          <div className="card-actions">
+                            <button className="icon-btn" title="수정" aria-label="덱 수정" onClick={() => openDeckModal(deck)}>✎</button>
+                            <button className="icon-btn danger" title="삭제" aria-label="덱 삭제" onClick={() => handleDeleteDeck(deck.id, deck.name)}>🗑</button>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <div className="member-row">
+                    <div className="member-list">
                       {deck.member_ids.length === 0 ? (
                         <span className="picker-empty">등록된 디지몬 없음</span>
                       ) : (
@@ -447,18 +472,29 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                           if (!d) return null;
                           const owned = isOwned(id);
                           return (
-                            <span
-                              key={id}
-                              className={`avatar${owned ? "" : " is-missing"}`}
-                              style={owned && !d.image_url ? { background: avatarColor(d.name) } : undefined}
-                              title={`${d.name}${owned ? " (보유)" : " (미보유)"}`}
-                            >
-                              {d.image_url ? <img src={d.image_url} alt={d.name} /> : initials(d.name)}
+                            <span key={id} className={`member-item${owned ? "" : " is-missing"}`} title={owned ? "보유" : "미보유"}>
+                              <span className={`avatar-slot${d.is_u_grade ? " is-u-grade" : ""}`}>
+                                <span
+                                  className={`avatar${owned ? "" : " is-missing"}`}
+                                  style={owned && !d.image_url ? { background: avatarColor(d.name) } : undefined}
+                                >
+                                  {d.image_url ? <img src={d.image_url} alt={d.name} /> : initials(d.name)}
+                                </span>
+                              </span>
+                              <DigimonName name={d.name} />
                             </span>
                           );
                         })
                       )}
                     </div>
+                    {deck.effect && (
+                      <div className="effect-block">
+                        <h5>효과</h5>
+                        {deck.effect.split("\n").map((line, i) => (
+                          <div key={i} className="effect-line">{line}</div>
+                        ))}
+                      </div>
+                    )}
                     <div className="deck-card-foot">
                       <span className="progress-frac">{st.owned}/{st.total} <span className="pct">· {st.percent}%</span></span>
                       <span className={`status-pill ${st.ready ? "ready" : "incomplete"}`}>
@@ -500,15 +536,17 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                 const owned = isOwned(d.id);
                 return (
                   <div key={d.id} className="digimon-card">
-                    <span
-                      className={`avatar${owned ? "" : " is-missing"}`}
-                      style={owned && !d.image_url ? { background: avatarColor(d.name) } : undefined}
-                    >
-                      {d.image_url ? <img src={d.image_url} alt={d.name} /> : initials(d.name)}
+                    <span className={`avatar-slot${d.is_u_grade ? " is-u-grade" : ""}`}>
+                      <span
+                        className={`avatar${owned ? "" : " is-missing"}`}
+                        style={owned && !d.image_url ? { background: avatarColor(d.name) } : undefined}
+                      >
+                        {d.image_url ? <img src={d.image_url} alt={d.name} /> : initials(d.name)}
+                      </span>
                     </span>
                     <div className="digimon-info">
-                      <div className="dname">{d.name}</div>
-                      <div className="duse">{usageCount(d.id)}개 덱에 사용됨</div>
+                      <DigimonName name={d.name} className="dname" />
+                      <div className="duse">{usageCount(d.id)}개 덱에 사용됨{d.is_u_grade ? " · U등급" : ""}</div>
                     </div>
                     <div className="digimon-card-actions">
                       <label className="switch" title="보유 여부 전환">
@@ -591,10 +629,12 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                         aria-pressed={selected}
                         onClick={() => toggleMember(d.id)}
                       >
-                        <span className="avatar mini-avatar" style={d.image_url ? undefined : { background: avatarColor(d.name) }}>
-                          {d.image_url ? <img src={d.image_url} alt="" /> : initials(d.name)}
+                        <span className={`avatar-slot${d.is_u_grade ? " is-u-grade" : ""}`}>
+                          <span className="avatar mini-avatar" style={d.image_url ? undefined : { background: avatarColor(d.name) }}>
+                            {d.image_url ? <img src={d.image_url} alt="" /> : initials(d.name)}
+                          </span>
                         </span>
-                        {d.name}
+                        <DigimonName name={d.name} />
                       </button>
                     );
                   })
@@ -670,6 +710,18 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
                   <span className="image-upload-hint">등록하지 않으면 이름 첫 글자로 표시돼요</span>
                 </div>
               </div>
+            </div>
+            <div className="field" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <label htmlFor="digimonUGrade" style={{ margin: 0 }}>U등급 디지몬</label>
+              <label className="switch">
+                <input
+                  id="digimonUGrade"
+                  type="checkbox"
+                  checked={digimonForm.isUGrade}
+                  onChange={(e) => setDigimonForm((p) => ({ ...p, isUGrade: e.target.checked }))}
+                />
+                <span className="switch-track" />
+              </label>
             </div>
             <div className="modal-actions">
               {digimonForm.id && (
