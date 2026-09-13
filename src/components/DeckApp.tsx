@@ -682,6 +682,8 @@ export default function DeckApp({ userId, userName, userEmail, userAvatarUrl }: 
       <p className="footer">
         덱/디지몬 목록은 로그인 없이 누구나 볼 수 있어요.
         {userId ? " 보유 여부는 이 계정에 저장되어 어떤 기기에서 열어도 유지됩니다." : " 보유 여부를 체크하고 저장하려면 구글 로그인이 필요합니다."}
+        {" · "}
+        <a href="/privacy">개인정보처리방침</a>
       </p>
 
       {isAdmin && deckModalOpen && (
