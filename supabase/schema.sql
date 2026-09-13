@@ -35,6 +35,11 @@ create table if not exists public.user_digimon_ownership (
   primary key (user_id, digimon_id)
 );
 
+-- 기존에 이미 만들어져 있던 테이블이라면 create table이 무시되므로,
+-- 누락됐을 수 있는 컬럼을 안전하게 추가합니다.
+alter table public.digimons add column if not exists image_url text;
+alter table public.decks add column if not exists description text not null default '';
+
 create index if not exists decks_name_idx on public.decks(name);
 create index if not exists ownership_user_idx on public.user_digimon_ownership(user_id);
 
